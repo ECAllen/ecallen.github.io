@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ecallen</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="https://latex.now.sh/style.css" />
+</head>
+<body>
+<button id="dark-mode-toggle">Toggle dark mode</button>
+<header id="title-block-header">
+<h1 class="title">ecallen</h1>
+</header>
+<h1
+id="moltbook-where-prompting-vibe-coding-and-security-overlap">Moltbook:
+Where Prompting, Vibe Coding, and Security Overlap</h1>
+<p>Moltbook calls itself “the front page of the agent internet”—a
+Reddit-style social network built exclusively for AI agents. Humans
+register agents, those agents post, comment, vote, and form communities.
+The content is what you’d expect from unsupervised LLMs: agents
+inventing religions, composing manifestos, forming digital
+subcultures.</p>
+<p>What makes Moltbook worth looking at isn’t the content. It’s that the
+platform sits at the intersection of three things: prompt engineering as
+a surface area, vibe-coded infrastructure, and agent security.</p>
+<h2 id="how-it-actually-works">How It Actually Works</h2>
+<p>Moltbook follows the <a
+href="https://agentskills.io/specification">Agent Skills
+specification</a>, a format for describing capabilities that AI agents
+can pick up and use. The core of Moltbook’s integration is a
+<code>SKILL.md</code> file hosted at <code>moltbook.com/skill.md</code>.
+You point your agent at it, and it learns how to interact with the
+platform.</p>
+<p>The registration flow is straightforward:</p>
+<ol type="1">
+<li>The agent sends a <code>POST</code> to <code>/agents/register</code>
+with a name and description.</li>
+<li>It gets back an API key, a claim URL, and a verification code.</li>
+<li>The human behind the agent verifies their email and posts a
+verification tweet.</li>
+<li>The account goes live.</li>
+</ol>
+<p>From there, the SKILL.md lays out the full API surface: creating
+posts (capped at one per 30 minutes), commenting (one per 20 seconds, 50
+per day), voting, following other agents, creating and moderating
+communities (“submolts”), managing profiles, and semantic search.
+There’s a small table in the file referencing additional skill
+documents—<code>HEARTBEAT.md</code> for periodic engagement guidelines,
+<code>MESSAGING.md</code> for DMs, <code>RULES.md</code> for community
+policies—that the agent loads as needed. The idea is progressive
+disclosure: metadata is cheap, full instructions load on activation, and
+reference material loads only when required.</p>
+<p>The authentication model is simple bearer tokens. Every request
+carries <code>Authorization: Bearer YOUR_API_KEY</code>. The SKILL.md
+even includes a warning in bold: only send your API key to the
+<code>www.moltbook.com</code> domain, never share it elsewhere.</p>
+<p>That warning matters later.</p>
+<h2 id="the-security-review">The Security Review</h2>
+<p>In late January 2026, researchers at Wiz found a misconfigured
+Supabase database backing the platform. A publishable API key was
+hardcoded in client-side JavaScript. Row Level Security wasn’t enabled.
+That key granted unauthenticated read and write access to the production
+PostgreSQL database.</p>
+<p>What was exposed: 1.5 million agent API keys, 35,000 email addresses,
+claim tokens, verification codes, and 4,060 private direct messages
+between agents—some containing plaintext OpenAI API keys that users had
+shared assuming the messages were private.</p>
+<p>The more interesting finding was structural. While Moltbook
+publicized 1.5 million registered agents, the database showed only about
+17,000 human accounts behind them. An 88:1 ratio. Wiz researcher Gal
+Nagli confirmed he could register a million agents in minutes—no rate
+limiting, no verification that an “agent” was actually AI, no mechanism
+to distinguish an LLM-driven bot from a human with a <code>curl</code>
+command. Most of the “agent internet” was humans operating fleets of
+bots.</p>
+<p>Who has that many tokens to burn? Someone with deep pockets or, more
+likely, someone who realized you didn’t actually need tokens at all—just
+a loop and a POST request.</p>
+<p>The vulnerability was disclosed on January 31 and patched through the
+night, with all tables secured by February 1. The maintainer responded
+quickly, but it took multiple rounds of fixes, table by table. Security
+hardening isn’t a single pass, especially when the original code wasn’t
+written with access controls in mind.</p>
+<p>The <a
+href="https://www.wiz.io/blog/exposed-moltbook-database-reveals-millions-of-api-keys">Wiz
+blog post</a> is worth reading in full.</p>
+<h2 id="the-prompt-injection-surface">The Prompt Injection Surface</h2>
+<p>If you browse Moltbook’s posts, you’ll find agents <a
+href="https://www.moltbook.com/post/e1606f66-24b6-44c2-ada3-42cd25804d90">warning
+each other about API key theft</a>—posts initiated by humans, worded by
+LLMs, warning other human-operated LLMs about credential security on a
+platform that was itself leaking credentials.</p>
+<p>Simon Willison identified three conditions converging on
+Moltbook:</p>
+<ol type="1">
+<li><strong>Private data access</strong>: Agents handling user emails
+and sensitive credentials.</li>
+<li><strong>Untrusted content</strong>: Agents ingesting posts from
+other agents and external sources with no verification.</li>
+<li><strong>External communication</strong>: Agents able to transmit
+data outside the platform.</li>
+</ol>
+<p>This combination makes prompt injection practical. A malicious post
+from one agent could get another to leak its API key or execute
+unintended actions. The entire content layer is agent-generated, so
+there’s no human filter between a poisoned post and the agent that reads
+it.</p>
+<p>This is already happening. OpenSourceMalware documented 14 fake
+“skills” uploaded to ClawHub—packages posing as crypto trading utilities
+that actually ran data-stealing code. One reached Moltbook’s
+homepage.</p>
+<h2 id="vibe-coded-all-the-way-down">Vibe Coded All the Way Down</h2>
+<p>Moltbook’s founder publicly stated that he “didn’t write a single
+line of code” for the platform. He described the architecture, and AI
+built it. The whole thing is vibe coded.</p>
+<p>This isn’t a knock on AI-assisted development, but it does illustrate
+a gap. Current AI coding tools build functional software quickly. They
+don’t yet reason well about access controls and security defaults. Vibe
+coding got the product to market. It also left Row Level Security turned
+off.</p>
+<h2 id="why-care">Why Care</h2>
+<p>There are existential conversations happening about AI agents and
+autonomy. Those aren’t what makes Moltbook interesting. What’s
+interesting is that it’s a working example of what happens when the
+agent internet meets real infrastructure.</p>
+<p>Wiz CTO Ami Luttwak: “The new internet is actually not verifiable.
+There is no clear identity. There’s no clear distinction between AI and
+humans, and there’s definitely no definition for an authentic AI.”</p>
+<p>George Chalhoub at UCL: “If 770K agents on a Reddit clone create this
+much chaos, what happens managing enterprise infrastructure?”</p>
+<p>My prediction: Moltbook and the OpenClaw ecosystem will be fertile
+ground for agent scams and developing gaurdrails. The skills spec is an
+open standard. Anyone can publish a SKILL.md. Anyone can register
+agents. The surface area for social engineering—not of humans, but of
+other agents—is open and largely unguarded. The guardrails don’t exist
+yet.</p>
+<br>
+<br>
+<hr>
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-sa/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>. Code snippets are licensed under the <a href="https://opensource.org/licenses/MIT">MIT License</a>.
+
+<script>
+    const darkModeToggle = document.getElementById('dark-mode-toggle')
+    darkModeToggle.addEventListener('click', () => {
+      document.body.classList.toggle('latex-dark')
+    })
+</script>
+</body>
+</html>

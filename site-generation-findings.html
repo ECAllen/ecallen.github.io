@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ecallen</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="https://latex.now.sh/style.css" />
+</head>
+<body>
+<button id="dark-mode-toggle">Toggle dark mode</button>
+<header id="title-block-header">
+<h1 class="title">ecallen</h1>
+</header>
+<h1 id="site-generation-findings">Site Generation Findings</h1>
+<h2 id="overview">Overview</h2>
+<p>The blog is a static site generated with <strong>Pandoc</strong>,
+styled with the LaTeX CSS stylesheet (<code>latex.now.sh</code>). The
+generation process converts Markdown files into standalone HTML pages
+and deploys them to two targets simultaneously.</p>
+<h2 id="architecture">Architecture</h2>
+<pre><code>docs/*.md (source content)
+templates/*.md.tmpl (Jinja2 templates)
+assets/ (shared HTML/JS fragments)
+    ├── license.html
+    ├── topbar.html (dark mode toggle button)
+    └── dark.js (dark mode logic)
+        │
+        ▼
+   bin/generate.sh (orchestrator)
+   bin/template.py (Jinja2 renderer)
+        │
+        ▼
+   staging/ (intermediate working dir)
+        │
+        ▼
+  ┌─────┴──────┐
+  html/        ~/Documents/GitHub/ecallen.github.io/
+  (local)      (GitHub Pages deploy)</code></pre>
+<h2 id="how-bingenerate.sh-works-current-version">How
+<code>bin/generate.sh</code> Works (Current Version)</h2>
+<p>The script is a <strong>zsh</strong> script (the docs describe an
+older bash version). Here is the step-by-step flow:</p>
+<ol type="1">
+<li><p><strong>Clean output directories</strong> - Removes all
+<code>.html</code> files from both deploy targets (<code>html/</code>
+and the GitHub Pages repo) and clears <code>staging/</code>.</p></li>
+<li><p><strong>Stage source content</strong> - Copies all
+<code>.md</code> files from <code>docs/</code> into
+<code>staging/</code>. Renames <code>notes.md</code> to
+<code>heap.md</code> in the process.</p></li>
+<li><p><strong>Loop over each deploy target</strong> - The script
+iterates over two deploy directories and for each one:</p>
+<ul>
+<li>Copies the <code>index.md.tmpl</code> template into
+<code>staging/index.md</code>.</li>
+<li>Runs <code>bin/template.py</code> to render the Jinja2
+<code>{{ hostname }}</code> variable in the index template (set to
+<code>ecallen.github.io</code> or <code>ecallen.com</code> depending on
+the target).</li>
+<li>Runs <strong>Pandoc</strong> on every <code>.md</code> file in
+<code>staging/</code>, converting each to a standalone HTML file in the
+deploy directory.</li>
+</ul></li>
+<li><p><strong>Pandoc options used</strong>:</p>
+<ul>
+<li><code>--standalone</code> - Full HTML document with head/body.</li>
+<li><code>--template=./default.html5</code> - Custom Pandoc HTML5
+template (from the pandoc-templates repo).</li>
+<li><code>--css "https://latex.now.sh/style.css"</code> - LaTeX-style
+CSS.</li>
+<li><code>--metadata title="ecallen"</code> - Page title.</li>
+<li><code>--include-after-body="assets/license.html"</code> - License
+footer.</li>
+<li><code>--include-before-body="assets/topbar.html"</code> - Dark mode
+toggle.</li>
+<li><code>--include-after-body="assets/dark.js"</code> - Dark mode
+JavaScript.</li>
+<li><code>--variable=lastUpdated</code> /
+<code>--variable=creationDate</code> - File timestamps via
+<code>stat</code>.</li>
+</ul></li>
+</ol>
+<h2 id="supporting-scripts">Supporting Scripts</h2>
+<h3 id="bintemplate.py"><code>bin/template.py</code></h3>
+<p>A small Jinja2 renderer. Takes a template file and
+<code>key=value</code> pairs as CLI arguments, renders the template, and
+prints the result to stdout. Used to inject the correct hostname into
+<code>index.md.tmpl</code> for each deploy target. Requires the
+<code>jinja2</code> package (managed via <code>uv</code>).</p>
+<h2 id="deploy-targets">Deploy Targets</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Directory</th>
+<th>Hostname</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>html/</code></td>
+<td><code>ecallen.com</code></td>
+<td>Local preview / custom domain</td>
+</tr>
+<tr>
+<td><code>~/Documents/GitHub/ecallen.github.io</code></td>
+<td><code>ecallen.github.io</code></td>
+<td>GitHub Pages</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>deploy_info</code> associative array maps each directory to
+its hostname so the index template gets the correct links.</p>
+<h2 id="differences-documented-version-vs.-current-script">Differences:
+Documented Version vs. Current Script</h2>
+<p>The <code>docs/generate-site.md</code> describes an <strong>older
+version</strong> of the pipeline. Key differences:</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Documented (old)</th>
+<th>Current (<code>bin/generate.sh</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Shell</td>
+<td>bash</td>
+<td>zsh</td>
+</tr>
+<tr>
+<td>Notes handling</td>
+<td><code>csplit</code> to split <code>notes.md</code> by headers into
+<code>sections/</code></td>
+<td>Copies <code>notes.md</code> as <code>heap.md</code> into
+<code>staging/</code> (no splitting)</td>
+</tr>
+<tr>
+<td>Index links</td>
+<td>Auto-generated from section HTML via <code>htmlq</code></td>
+<td>Managed manually in <code>index.md.tmpl</code></td>
+</tr>
+<tr>
+<td>Template engine</td>
+<td>None (manual <code>cp index.md.tmpl</code>)</td>
+<td>Jinja2 via <code>bin/template.py</code></td>
+</tr>
+<tr>
+<td>Deploy targets</td>
+<td>Single (<code>html/</code>)</td>
+<td>Two (<code>html/</code> + GitHub Pages repo)</td>
+</tr>
+<tr>
+<td>Dark mode</td>
+<td>Not present</td>
+<td><code>topbar.html</code> + <code>dark.js</code> injected</td>
+</tr>
+<tr>
+<td>Local preview</td>
+<td>Flask server</td>
+<td>Not included in script</td>
+</tr>
+</tbody>
+</table>
+<h2 id="potential-issues-in-current-script">Potential Issues in Current
+Script</h2>
+<ol type="1">
+<li><p><strong><code>stat</code> variable uses <code>${fn}</code>
+instead of <code>${f}</code></strong> - Lines 39-40 reference
+<code>${fn}</code> which is never assigned in the current script. The
+loop variable is <code>$f</code>. This means <code>lastUpdated</code>
+and <code>creationDate</code> are likely empty or pulling from a stale
+value.</p></li>
+<li><p><strong><code>stat</code> flags are macOS-specific</strong> - The
+script uses <code>stat -f %m</code> and <code>stat -f %c</code> which
+are BSD/macOS <code>stat</code> flags. The documented version used
+<code>stat -c</code> (GNU/Linux). The current version is correctly
+targeting macOS but would break on Linux.</p></li>
+</ol>
+<h2 id="workflow-summary">Workflow Summary</h2>
+<ol type="1">
+<li>Write markdown in <code>drafts/</code>.</li>
+<li>When ready, move the file to <code>docs/</code>.</li>
+<li>Add a link in <code>templates/index.md.tmpl</code> if needed.</li>
+<li>Run <code>bin/generate.sh</code> to build the site.</li>
+<li>Use <code>bin/deploy.sh</code> to push to GitHub Pages.</li>
+</ol>
+<br>
+<br>
+<hr>
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-sa/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>. Code snippets are licensed under the <a href="https://opensource.org/licenses/MIT">MIT License</a>.
+
+<script>
+    const darkModeToggle = document.getElementById('dark-mode-toggle')
+    darkModeToggle.addEventListener('click', () => {
+      document.body.classList.toggle('latex-dark')
+    })
+</script>
+</body>
+</html>
